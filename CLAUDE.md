@@ -39,8 +39,21 @@
 | **輸入** | **原始 log 檔**（`.log` / `.txt` / `.csv`），**不經過 Excel**。內容是一大坨未剖析的文字 |
 | log 格式 | 同一份 recipe 面對的 N 份 log **格式完全相同**（不同機台、不同時間）→ recipe 可**純機械重放**，不需 LLM 做欄位模糊對應 |
 | 輸出 | 每份 log **各自**一套表與圖，**下載 xlsx、圖嵌在檔案裡** |
-| 前端 | **Univer OSS**（https://github.com/dream-num/univer）當試算表介面，供使用者剖析、篩選、確認解析結果 |
-| 計算 | 一律在後端 pandas。Univer 只是**檢視與操作介面，不是計算引擎** |
+| 前端 | **輕量 data grid**（非試算表引擎）。職責只有三件：顯示 preview 格線、點值產生篩選條件、確認剖析結果 |
+| 計算 | **一律在後端 pandas。** 前端不做任何計算 |
+| 儲存格編輯 | **刻意不提供。** 見下方說明 |
+
+#### 為什麼不給「可編輯的試算表」
+
+看起來是體貼使用者，實際上會**打破整個產品的地基**：
+
+> **手動編輯儲存格的動作，錄不進 recipe。**
+
+使用者改了三格，第 2～10 份 log 重放時那三格不會被改到——重放就不再是確定性的。
+要支援就得把手動編輯也變成指令，那等於在做一個試算表軟體。
+
+**所有對資料的修改，都必須經由會被錄進 recipe 的指令。** 這條規則同時決定了前端選型：
+需要的是一個**唯讀格線**，不是試算表引擎。
 
 ### LLM 的定位（重要，不要搞反）
 
@@ -64,11 +77,10 @@
 ### 不做什麼
 
 - **不使用 `pandasai/ee` 目錄下的功能**（授權條款不同）
-- **不使用 Univer Pro 的任何功能**——`Pivot Table`、`Chart`、`import/export`、協作都屬於商業版，**不在 Apache-2.0 的 OSS 範圍內**。與 `pandasai/ee` 同等級的授權紅線
-  - 樞紐 → 後端 pandas 做
-  - 圖表 → 後端 matplotlib 產 PNG，嵌進 xlsx
-  - 讀寫 Excel → 後端 pandas / openpyxl 做，再把資料餵進 Univer 的 snapshot API
-  - CI 應加一道檢查，擋掉 `@univerjs-pro/*` 之類的依賴進入 lockfile
+- **不碰任何前端套件的商業／Enterprise 分層。** 本專案已經被這個模式絆到兩次，一律視為紅線：
+  - ~~Univer~~ 的 `Pivot Table` / `Chart` / `import/export` 都在 **Univer Pro**，不在 Apache-2.0 內（前端已改用輕量 grid，見 1.，此項保留為紀錄）
+  - **AG Grid** 的 row grouping、pivoting 等在 **Enterprise**；Community 才是 MIT
+  - **CI 要加一道檢查**，擋掉商業版套件（`@univerjs-pro/*`、`ag-grid-enterprise` 等）進入 lockfile
 - 不對外連線、不呼叫任何雲端 LLM
 
 ---
@@ -81,7 +93,7 @@
 | 交付鏈 | GitHub Actions build image → `docker save` → `.tar.gz` → GitHub Release → 人工下載帶進內網 → `docker load` |
 | PandasAI 要求 Python <= 3.11 | base image 固定 **`python:3.11-slim`** |
 | matplotlib 中文 | 必須在 image 內安裝 **中文字型（Noto CJK）** 並設定 matplotlib font family，否則圖表中文變方框 |
-| Univer 是 React + TypeScript + canvas | Dockerfile 要多一個 **Node build stage**，在 GitHub Actions build 時把 npm 依賴全部打包成靜態檔進 image。內網不可能 `npm install` |
+| 前端要 build | Dockerfile 要多一個 **Node build stage**，在 GitHub Actions build 時把 npm 依賴全部打包成靜態檔進 image。**內網不可能 `npm install`** |
 | xlsx 輸出要嵌圖 | 需要 **`openpyxl`**（寫檔並嵌圖）+ **`Pillow`**（openpyxl 嵌圖的前置）。兩者都要進 image |
 | recipe 必須持久化 | 容器**不能全 `--read-only`**，要掛一個可寫 volume 存 recipe。邊界見 3.2 |
 
@@ -186,10 +198,10 @@ filter:
 
 ### 3.1.3 資料流：後端持有 raw data，前端只顯示 preview
 
-機台 log 可能很大，**全部塞進前端試算表會卡死瀏覽器**。
+機台 log 可能很大，**全部塞進前端會卡死瀏覽器**。
 
 - 後端持有完整 raw data
-- 前端（Univer）只顯示 **preview（前 N 列）**
+- 前端只顯示 **preview（前 N 列）**，並需要**虛擬捲動**
 - 使用者的剖析／篩選動作轉成**結構化指令**送回後端 replay
 
 這跟 recipe 的概念天生吻合：使用者的操作序列就是指令序列。
@@ -237,18 +249,23 @@ recipe 由後端解讀成 pandas 操作，**不是 `exec()` 使用者存的字�
 
 - **recipe 指令集的細節** —— 骨架已定（見 3.1.1 / 3.1.2），但參數集要用**真實的脫敏 log 檔**驗證過才算數
 - **相對時間怎麼存進 recipe**（見 3.1.2）
-- 🔺 **前端選型：Univer OSS vs. 輕量 data grid** —— 選 Univer 時以為要處理排版過的髒 Excel。
-  現在輸入是純文字、計算全在後端、Univer 的 pivot/chart/import-export 又都是 Pro 不能用，
-  它剩下的職責只有「preview 格線 + 點值篩選」。**待使用者拍板**，見下方分析
+- **grid 元件的具體選擇**（設計階段再定，不影響架構）：
+  - **TanStack Table + TanStack Virtual** —— 全 MIT、**無商業版分層**，但 headless，UI 全要自己刻
+  - **AG Grid Community** —— 開箱即用（虛擬捲動、欄寬、排序都有），但 bundle 較大、
+    且有 Enterprise 分層（見「不做什麼」的紅線）
+  - 傾向 TanStack：這個專案已經被 OSS/商業分層絆到兩次，選一個沒有分層的比較省心
+- **資料剖析精靈的互動細節** —— 固定寬度的可拖拉切點標尺、delimiter 的即時 preview，
+  **這兩個不管用什麼 grid 都要自己刻**，是前端最重的一塊
 - **資料留存與身份**：上傳的 log 與產出的報表要不要落地？要不要登入？
   （recipe 本身已確定必須持久化，見 3.2）
-- **後端框架與前端整合方式**（Univer OSS 已定為試算表介面，但怎麼跟後端接還沒設計）
+- **後端框架，以及前後端的指令／preview 介面怎麼設計**
 - **MVP 功能範圍與 Phase 切分**
 - **內網 LLM 實際型號**
 
 ### 已從本清單移除（已定案）
 
-- ~~UI 形式~~ → 內網只有 vLLM 裸 API，沒有 Open WebUI。**不為此專案另外部署 Open WebUI**（斷網交付鏈每多一個 image 就多一份人工搬運與版本對齊成本，而剖析確認流程塞不進 chat 介面）。UI 自己做，試算表介面用 Univer OSS
+- ~~UI 形式~~ → 內網只有 vLLM 裸 API，沒有 Open WebUI。**不為此專案另外部署 Open WebUI**（斷網交付鏈每多一個 image 就多一份人工搬運與版本對齊成本，而剖析確認流程塞不進 chat 介面）。UI 自己做
+- ~~前端用 Univer OSS~~ → **改用輕量 data grid。** Univer 是在「要處理排版過的髒 Excel」的前提下選的，那個前提已不成立：輸入是純文字、計算全在後端、pivot/chart/import-export 又都是 Pro 不能用。它剩下的職責只有「唯讀 preview 格線 + 點值篩選」，不值得為此付出 React + canvas + 公式引擎的斷網 image 成本。**更關鍵的是「可編輯」在這裡是負債不是資產**——手動編輯錄不進 recipe，見 1.
 - ~~PandasAI 端呼叫方式~~ → **自幹 `VLLMChat(LLM)`**。選項 A（`pandasai-openai`）被寫死的型號白名單擋死；選項 B（litellm）太重且預設會連外抓 model cost map，斷網環境的額外失敗點。詳見 `docs/pandasai-api-notes.md` 2.3
 - ~~輸入是否經過 Excel~~ → **直接吃原始 log 檔，不經過 Excel**。同事拿得到機台吐出來的原始檔，匯進 Excel 只是習慣。跳過後順便避開 Excel 的自動轉型破壞（見 1.）。`openpyxl` 仍需保留——輸出端要寫 xlsx
 
