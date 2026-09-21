@@ -119,4 +119,4 @@ brainstorming  →  writing-plans  →  test-driven-development  →  requesting
 |---|---|
 | _(待建立)_ | brainstorming 產出的 spec |
 | _(待建立)_ | implementation plan |
-| _(待建立)_ | PandasAI API 研讀筆記 |
+| `docs/pandasai-api-notes.md` | PandasAI v3 原始碼研讀筆記 |
