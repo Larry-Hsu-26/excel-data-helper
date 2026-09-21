@@ -1,0 +1,77 @@
+# 放在 repo 的 .github/workflows/docker-release.yml
+name: Build & Release Docker Image
+
+on:
+  push:
+    tags:
+      - 'v*'            # 推送 v1.0.0 這類 tag 時自動觸發
+  workflow_dispatch:     # 也可以在 Actions 頁面手動觸發
+
+permissions:
+  contents: write        # 建立 Release 需要寫入權限
+
+env:
+  IMAGE_NAME: myapp          # 改成你的 image 名稱
+  PLATFORM: linux/amd64      # 內網 server 若是 ARM 改 linux/arm64
+  SPLIT_SIZE: 1900m          # Release 單檔上限 2 GiB，超過就切檔
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # GitHub runner 預設可用空間約 14GB，大 image 先清空間
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+          df -h
+
+      - name: Decide version tag
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-$(date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (load into local docker, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ env.PLATFORM }}
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.ver.outputs.tag }}
+          load: true
+          push: false
+
+      - name: Save, compress, checksum, split if needed
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          mkdir -p dist
+          FILE="${IMAGE_NAME}-${TAG}.tar.gz"
+          docker save "${IMAGE_NAME}:${TAG}" | gzip -6 > "dist/${FILE}"
+          cd dist
+          # 先對完整檔案算 checksum，內網還原後用來驗證
+          sha256sum "${FILE}" > SHA256SUMS.txt
+          SIZE=$(stat -c%s "${FILE}")
+          if [ "$SIZE" -gt 2000000000 ]; then
+            split -b "${SPLIT_SIZE}" -d -a 2 "${FILE}" "${FILE}.part"
+            rm "${FILE}"
+          fi
+          ls -lh
+
+      - name: Create GitHub Release and upload files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          gh release create "${TAG}" dist/* \
+            --target "${GITHUB_SHA}" \
+            --title "${TAG}" \
+            --notes "Docker image ${IMAGE_NAME}:${TAG} (${PLATFORM})"
