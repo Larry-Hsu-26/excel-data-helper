@@ -81,7 +81,9 @@
 
 ### 交付 pipeline
 
-`.github/workflows/docker-release.yml`：tag push (`v*`) 或手動 dispatch 觸發，build → `docker save | gzip` → 算 SHA256 → 超過 2 GiB 自動切檔 → 建立 GitHub Release。
+`.github/workflows/docker-release.yml`：**僅手動 dispatch 觸發**，必填 `version` 輸入且強制 `vX.Y.Z` 格式（格式不符直接 fail）。流程：build → `docker save | gzip` → 算 SHA256 → 超過 2 GiB 自動切檔 → 建立 GitHub Release。
+
+> tag push 觸發已刻意移除——發版是要人工帶進內網的動作，不該因為推了 tag 就自動發生。
 
 **待辦**：
 - 加上 **smoke test**——啟動容器並呼叫 `/health` 成功，才允許發 Release。
