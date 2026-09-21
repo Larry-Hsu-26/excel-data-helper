@@ -107,9 +107,26 @@ brainstorming  →  writing-plans  →  test-driven-development  →  requesting
 
 ### Git
 
-- 開發分支：`claude/<session-branch>`，由 session 指定
-- push：`git push -u origin <branch>`
-- **不要主動開 PR**，除非使用者明確要求
+- **直接在 `main` 上開發並推送**：`git push -u origin main`。不再開 `claude/<session-branch>` feature branch。
+- **不要主動開 PR**，除非使用者明確要求。
+
+#### Commit 身份（重要）
+
+Claude Code 託管環境的 `git config` 預設會把 commit author 設成 `Claude <noreply@anthropic.com>`。
+GitHub 以 email 反查帳號，該 email 對應到真實帳號 **@claude**，會導致 **@claude 出現在 repo 的 Contributors 清單**。
+
+因此每個 session **在第一次 commit 前**必須先設定身份：
+
+```bash
+git config user.name  "Larry Hsu"
+git config user.email "hantsunghsu@gmail.com"
+```
+
+並且 **commit message 結尾不要加下列 trailer**（GitHub 會把 co-author 一併計入 Contributors，
+即使 author 已經改成使用者本人也一樣）：
+
+- `Co-Authored-By: Claude ...`
+- `Claude-Session: ...`
 
 ---
 
